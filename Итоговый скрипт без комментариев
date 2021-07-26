@@ -1,0 +1,84 @@
+-- Ответ на тестовое задание -- 
+
+SET ANSI_NULLS ON
+GO
+SET QUOTED_IDENTIFIER ON
+GO
+
+ALTER PROCEDURE [dbo].[sp_report_2]
+	@date_from date,
+	@date_to date,
+	@good_group_name nvarchar(MAX)
+AS
+
+BEGIN
+
+declare @date_from_int int
+declare @date_to_int int
+    
+	
+set @date_from_int = (select top 1 did from dbo.dim_date where d = @date_from )
+set @date_to_int = (select top 1 did from dbo.dim_date where d = @date_to )
+
+
+SELECT 
+    [Дата],
+    [Аптека],
+    [Группа товара],
+    [Номенклатура],
+    [Продажи шт.],
+    [Продажи руб., с НДС],
+    [Закупка руб., с НДС],
+    [Средняя цена закупки руб., без НДС], 
+    [Маржа руб., без НДС],
+    [Наценка %, без НДС],
+    [Сумма продаж руб., с НДС] / SUM([Сумма продаж руб., с НДС]) OVER(PARTITION BY [Дата], [Аптека], [Группа товара]) AS [Доля продаж товара с НДС]
+FROM (
+    SELECT
+        d.d as [Дата],
+        s.store_name as [Аптека],
+        g.group_name as [Группа товара] ,
+        g.good_name as [Номенклатура],
+        SUM(f.quantity) as [Продажи шт.],
+        SUM(f.sale_grs) as [Продажи руб., с НДС],
+        SUM(f.cost_grs) as [Закупка руб., с НДС],
+        AVG(f.cost_net) AS [Средняя цена закупки руб., без НДС],
+        AVG(f.sale_net) - AVG(f.cost_net) AS [Маржа руб., без НДС],
+        CASE WHEN AVG(f.cost_net) = 0 THEN AVG(f.sale_net) ELSE (AVG(f.sale_net) - AVG(f.cost_net))/AVG(f.cost_net) * 100 END AS [Наценка %, без НДС],
+        SUM(f.sale_grs) AS [Сумма продаж руб., с НДС]
+    FROM 
+        dbo.fct_cheque AS f
+        JOIN dbo.dim_goods AS g ON f.good_id = g.good_id
+        LEFT JOIN dbo.dim_stores AS s ON f.store_id = s.store_id
+        LEFT JOIN dbo.dim_date AS d ON f.date_id = d.did 
+        LEFT JOIN (
+                SELECT 
+                    DISTINCT cash_register_id,
+                    cash_register_number
+                FROM dbo.dim_cash_register
+            )  AS cr ON cr.cash_register_id = f.cash_register_id
+    WHERE date_id BETWEEN @date_from_int AND @date_to_int
+        AND g.group_name IN (SELECT * FROM string_split(@good_group_name, ','))
+    GROUP BY 
+        d.d,
+        s.store_name,
+        g.group_name,
+        g.good_name
+    ) AS query_1
+ORDER BY 
+    [Дата],
+    [Аптека],
+    [Доля продаж товара с НДС] DESC
+
+END
+GO
+
+
+EXEC [dbo].[sp_report_2]  @date_from = '2017-06-01', @date_to = '2017-06-30', @good_group_name = N'Биологически активные добавки,Косметические средства'
+
+
+
+
+
+
+
